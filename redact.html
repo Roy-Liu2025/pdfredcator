@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF 批量保密处理</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%; margin: 0; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #222; background: #f5f6f8;
+  }
+  .app { display: flex; flex-direction: column; height: 100vh; }
+
+  .topbar {
+    flex: 0 0 auto; background: #fff;
+    border-bottom: 1px solid #e2e8f0;
+    box-shadow: 0 1px 6px rgba(0,0,0,.06);
+    z-index: 10;
+  }
+  .row {
+    display: flex; flex-wrap: wrap; gap: 7px; align-items: center;
+    padding: 6px 14px;
+  }
+  .row + .row { border-top: 1px solid #f1f5f9; }
+
+  .title {
+    margin: 0 4px 0 auto;
+    font-size: 14px; font-weight: 600;
+    color: #1e293b; letter-spacing: .3px; white-space: nowrap;
+  }
+
+  button {
+    padding: 5px 11px; border: none; border-radius: 5px;
+    background: #2563eb; color: #fff; font-size: 12.5px; cursor: pointer;
+    transition: background .15s; white-space: nowrap;
+  }
+  button:hover:not(:disabled) { background: #1d4ed8; }
+  button:disabled { background: #cbd5e1; cursor: not-allowed; }
+  button.secondary { background: #64748b; }
+  button.secondary:hover:not(:disabled) { background: #475569; }
+  button.primary { background: #16a34a; }
+  button.primary:hover:not(:disabled) { background: #15803d; }
+  button.purple { background: #7c3aed; }
+  button.purple:hover:not(:disabled) { background: #6d28d9; }
+
+  .pill {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 24px; min-width: 50px; padding: 0 9px;
+    background: #f1f5f9; border-radius: 12px;
+    font-size: 12px; color: #475569;
+  }
+  .divider { width: 1px; height: 18px; background: #e2e8f0; margin: 0 3px; }
+  .status {
+    margin-left: 10px; font-size: 12px; color: #2563eb;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 320px;
+  }
+
+  .hint-row { font-size: 11.5px; color: #64748b; padding-top: 4px; padding-bottom: 6px; }
+  .hint-row .sep { color: #cbd5e1; margin: 0 4px; }
+  .coveropt { display: flex; gap: 12px; align-items: center; }
+  .coveropt label {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12.5px; cursor: pointer; color: #334155;
+  }
+  .swatch {
+    display: inline-block; width: 13px; height: 13px;
+    border: 1px solid #94a3b8; border-radius: 3px; vertical-align: middle;
+  }
+  .swatch.white  { background: #fff; }
+  .swatch.black  { background: #000; }
+  .swatch.mosaic {
+    background-image:
+      linear-gradient(45deg, #94a3b8 25%, transparent 25%, transparent 75%, #94a3b8 75%),
+      linear-gradient(45deg, #94a3b8 25%, #fff 25%, #fff 75%, #94a3b8 75%);
+    background-size: 8px 8px; background-position: 0 0, 4px 4px;
+  }
+
+  .content { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
+
+  .filelist {
+    flex: 0 0 250px;
+    background: #0f172a;
+    border: 2px solid #2563eb;
+    color: #fff;
+    overflow-y: auto; overflow-x: hidden;
+  }
+  .filelist-header {
+    position: sticky; top: 0; z-index: 2;
+    padding: 9px 14px;
+    background: #0f172a;
+    border-bottom: 1px solid #2563eb;
+    font-size: 12px; color: #cbd5e1;
+  }
+  .filelist-header .back-btn {
+    background: #2563eb; color: #fff; font-size: 12px;
+    padding: 4px 10px; border-radius: 4px; border: none;
+    cursor: pointer; margin-bottom: 6px;
+  }
+  .filelist-header .back-btn:hover { background: #1d4ed8; }
+  .fileitem {
+    padding: 8px 14px; font-size: 13px; color: #fff;
+    cursor: pointer; user-select: none;
+    border-bottom: 1px solid #1e293b;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .fileitem:hover { background: #1e293b; }
+  .fileitem.active { background: #1d4ed8; color: #fff; font-weight: 500; }
+  .fileitem.done { color: #f87171; }
+  .fileitem.done.active { color: #fecaca; }
+  .fileitem.disabled { color: #64748b; cursor: not-allowed; font-style: italic; }
+  .fileitem.disabled:hover { background: #0f172a; }
+  .fileitem .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fileitem .mark { flex-shrink: 0; font-size: 11px; }
+  .fileitem .dot  {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #22c55e; flex-shrink: 0;
+  }
+
+  .viewer-wrapper {
+    flex: 1 1 auto; position: relative; min-width: 0;
+    display: flex; overflow: hidden;
+    border: 3px solid #2563eb;
+    background: #ffffff;
+  }
+
+  /* ---------- 密堆神秘符号背景层 ---------- */
+  .bg-sketch {
+    position: absolute; inset: 0;
+    pointer-events: none; z-index: 0;
+    overflow: hidden;
+    color: #1e293b;
+    opacity: .16;               /* 整体浓淡：0.08~0.22 */
+  }
+  .bg-sketch svg { width: 100%; height: 100%; display: block; }
+
+  .viewer {
+    flex: 1; overflow: auto;
+    background: transparent;
+    text-align: center;
+    position: relative;
+    z-index: 1;
+  }
+
+  .viewer-controls {
+    position: absolute; top: 12px; right: 16px; z-index: 10;
+    display: flex; flex-direction: column; gap: 6px;
+    background: rgba(255,255,255,.94);
+    padding: 8px; border-radius: 8px;
+    border: 1px solid #dbeafe;
+    box-shadow: 0 3px 16px rgba(0,0,0,.18);
+    width: 248px;
+    backdrop-filter: blur(4px);
+  }
+  .ctrl-row { display: grid; gap: 6px; }
+  .ctrl-row.c3 { grid-template-columns: 1fr 1fr 1fr; }
+  .ctrl-row.c2 { grid-template-columns: 1fr 1fr; }
+
+  .viewer-controls button {
+    width: 100%; padding: 6px 4px; font-size: 12px; font-weight: 600;
+    border-radius: 5px; white-space: nowrap;
+  }
+  .viewer-controls .pill {
+    width: 100%; height: auto; min-width: 0; padding: 6px 4px;
+    border-radius: 5px; font-size: 12px; background: #f1f5f9;
+    display: flex; align-items: center; justify-content: center;
+    color: #334155;
+  }
+
+  .btn-blue { background: #2563eb; }
+  .btn-blue:hover:not(:disabled) { background: #1d4ed8; }
+  .btn-purple { background: #7c3aed; }
+  .btn-purple:hover:not(:disabled) { background: #6d28d9; }
+
+  .pdf-card {
+    display: inline-block;
+    margin: 20px;
+    background: #fff;
+    box-shadow: 0 3px 16px rgba(0,0,0,.18);
+  }
+  #pdfCanvas {
+    display: block; background: #fff;
+    cursor: crosshair; touch-action: none; user-select: none;
+  }
+  .viewer-wrapper.pan-mode #pdfCanvas { cursor: grab; }
+  .viewer-wrapper.pan-mode.panning #pdfCanvas { cursor: grabbing; }
+
+  .watermark {
+    position: absolute; right: 12px; bottom: 6px;
+    font-family: Elephant, Georgia, "Times New Roman", serif;
+    font-size: 18px; font-weight: bold;
+    color: #dc2626;
+    pointer-events: none; user-select: none;
+    letter-spacing: .3px; z-index: 5;
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+  }
+
+  .toast {
+    position: absolute; top: 60px; left: 50%;
+    transform: translateX(-50%) translateY(-10px);
+    background: rgba(30, 41, 59, .95);
+    color: #fff; padding: 9px 20px;
+    border-radius: 8px; font-size: 13px;
+    opacity: 0; pointer-events: none;
+    transition: opacity .25s, transform .25s;
+    z-index: 100;
+    box-shadow: 0 6px 20px rgba(0,0,0,.3);
+    max-width: 70%; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.success { background: rgba(22, 163, 74, .96); }
+  .toast.error   { background: rgba(220, 38, 38, .96); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <div class="row">
+      <button id="openDirBtn">选择文件夹</button>
+      <button id="openOutputBtn" class="secondary" disabled>打开处理OK</button>
+      <span class="status" id="status"></span>
+      <h1 class="title">PDF 批量保密处理</h1>
+    </div>
+
+    <div class="row hint-row">
+      <span>框选：左键拖拽</span><span class="sep">·</span>
+      <span>平移：空格+左键 / 中键</span><span class="sep">·</span>
+      <span>缩放：Ctrl+滚轮 或 右上角按钮</span><span class="sep">·</span>
+      <span>输出：当前文件夹下「处理ok」</span>
+      <div class="divider"></div>
+      <span style="color:#475569;">遮盖样式：</span>
+      <div class="coveropt" id="coverOptions">
+        <label><input type="radio" name="cover" value="white" checked>
+          <span class="swatch white"></span> 白色</label>
+        <label><input type="radio" name="cover" value="black">
+          <span class="swatch black"></span> 黑色</label>
+        <label><input type="radio" name="cover" value="mosaic">
+          <span class="swatch mosaic"></span> 马赛克</label>
+      </div>
+    </div>
+  </header>
+
+  <main class="content">
+    <aside class="filelist" id="filelist">
+      <div class="filelist-header" id="filelistHeader">未选择文件夹</div>
+    </aside>
+
+    <div class="viewer-wrapper" id="viewerWrapper">
+
+      <!-- ============================================================ -->
+      <!--      密堆神秘符号背景层（JS 生成，固定种子，无规则堆积）        -->
+      <!-- ============================================================ -->
+      <div class="bg-sketch" aria-hidden="true">
+        <svg id="bgSvg" viewBox="0 0 900 700"
+             preserveAspectRatio="xMidYMid slice"
+             xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <!-- 边缘渐隐遮罩 -->
+            <radialGradient id="bgFade" cx=".5" cy=".5" r=".62">
+              <stop offset="0"    stop-color="#fff" stop-opacity="1"/>
+              <stop offset=".42"  stop-color="#fff" stop-opacity=".96"/>
+              <stop offset=".62"  stop-color="#fff" stop-opacity=".72"/>
+              <stop offset=".78"  stop-color="#fff" stop-opacity=".34"/>
+              <stop offset=".9"   stop-color="#fff" stop-opacity=".1"/>
+              <stop offset="1"    stop-color="#fff" stop-opacity="0"/>
+            </radialGradient>
+            <mask id="bgMask">
+              <rect x="0" y="0" width="900" height="700" fill="url(#bgFade)"/>
+            </mask>
+
+            <!-- 分层模糊 -->
+            <filter id="bgBlur1" x="-10%" y="-10%" width="120%" height="120%">
+              <feGaussianBlur stdDeviation="1.1"/>
+            </filter>
+            <filter id="bgBlur2" x="-15%" y="-15%" width="130%" height="130%">
+              <feGaussianBlur stdDeviation="3.2"/>
+            </filter>
+          </defs>
+
+          <g mask="url(#bgMask)">
+            <g id="bgLayer1" filter="url(#bgBlur1)"></g>
+            <g id="bgLayer2" filter="url(#bgBlur2)"></g>
+            <g id="bgLayer0"></g>
+          </g>
+        </svg>
+      </div>
+
+      <!-- ======= 右上角浮动控制面板 ======= -->
+      <div class="viewer-controls" id="viewerControls">
+        <div class="ctrl-row c3">
+          <button id="zoomInBtn"  class="btn-blue"   disabled>＋</button>
+          <button id="zoomOutBtn" class="btn-purple" disabled>－</button>
+          <button id="fitBtn"     class="btn-blue"   disabled>适应</button>
+        </div>
+        <div class="ctrl-row c3">
+          <button id="prevPageBtn" disabled>◀</button>
+          <span class="pill" id="pageInfo">- / -</span>
+          <button id="nextPageBtn" disabled>▶</button>
+        </div>
+        <div class="ctrl-row c2">
+          <button id="clearBtn"    class="secondary" disabled>清除框选</button>
+          <button id="applyAllBtn" class="secondary" disabled title="把当前页的框选位置复制到所有源文件的同一页">套用到全部</button>
+        </div>
+        <div class="ctrl-row c2">
+          <button id="saveCurrentBtn" class="purple"  disabled title="只保存当前打开的这个文件">保存当前</button>
+          <button id="processBtn"     class="primary" disabled title="处理所有有框选的源文件">处理全部</button>
+        </div>
+      </div>
+
+      <div class="toast" id="toast"></div>
+      <section class="viewer" id="viewer">
+        <div class="pdf-card" id="pdfCard" style="display:none;">
+          <canvas id="pdfCanvas"></canvas>
+        </div>
+      </section>
+      <div class="watermark">porite</div>
+    </div>
+  </main>
+</div>
+
+<!-- ================= 背景符号生成（独立小脚本） ================= -->
+<script>
+(function () {
+  'use strict';
+
+  const CX = 450, CY = 350, RX = 460, RY = 360;
+  const TOTAL = 520;                      // 符号总数
+  let seed = 20261010;                    // 固定种子，布局稳定
+
+  function rnd() {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  }
+
+  /* ---- 图形库（坐标 -10..10，缩放后使用） ---- */
+  const PATHS = [
+    'M0,-10 5.9,8.1 -9.5,-3.1 9.5,-3.1 -5.9,8.1Z',                       // 五芒星
+    'M0,-10 8.7,5 -8.7,5Z M0,10 8.7,-5 -8.7,-5Z',                        // 六芒星
+    'M0,-9 7.8,4.5 -7.8,4.5Z',                                            // 正三角
+    'M0,9 7.8,-4.5 -7.8,-4.5Z',                                           // 倒三角
+    'M0,-9A9,9 0 1,0 .01,-9Z',                                            // 圆
+    'M0,-9A9,9 0 1,0 .01,-9Z M0,-4.5A4.5,4.5 0 1,0 .01,-4.5Z',            // 同心圆
+    'M0,-9A9,9 0 1,0 .01,-9Z M0,-7.2A7.2,7.2 0 1,0 .01,-7.2Z',            // 双圆环
+    'M2.5,-8.5A9,9 0 1,0 2.5,8.5 7,7 0 1,1 2.5,-8.5Z',                    // 月牙
+    'M-9,0Q0,-7.5 9,0Q0,7.5 -9,0Z M0,-3A3,3 0 1,0 .01,-3Z',               // 荷鲁斯之眼
+    'M0,-9 0,9 M-6,0 6,0',                                                 // 十字
+    'M0,-9 0,9 M-6,-3.5 6,-3.5',                                           // 倒十字
+    'M0,-9 0,9 M-6,4 6,4',                                                 // 上横
+    'M-6,0A3.5,3.5 0 1,1 -1.5,2.5A3.5,3.5 0 1,0 1.5,-2.5A3.5,3.5 0 1,1 6,0', // ∞
+    'M0,-9 2.3,-2.3 9,0 2.3,2.3 0,9 -2.3,2.3 -9,0 -2.3,-2.3Z',            // 八角星
+    'M-9,0 -4.5,-6 0,0 -4.5,6Z M9,0 4.5,-6 0,0 4.5,6Z',                   // 双箭头
+    'M-9,-3 0,-9 9,-3 9,6 0,9 -9,6Z',                                      // 六边形
+    'M0,-9 L0,0 L6,4',                                                     // 折角
+    'M-9,-9 L9,9 M9,-9 L-9,9',                                             // 叉
+    'M-9,0 Q-4.5,-6 0,0 T9,0',                                             // 波纹
+    'M0,-9 C-6,-3 -6,3 0,9 C6,3 6,-3 0,-9Z',                               // 泪滴
+    'M0,-9 L4,0 L0,9 L-4,0Z M-4,0 L4,0',                                   // 菱形加横
+    'M0,-9 L0,9 M-9,-4 L9,-4 M-9,4 L9,4',                                  // 三横
+    'M-9,0 A9,9 0 0,1 9,0',                                                // 半圆
+    'M-9,0 A9,4.5 0 1,0 9,0 A9,4.5 0 1,0 -9,0Z',                           // 椭圆
+    'M-9,3 L-3,-6 L3,3 L9,-6',                                             // 折线
+    'M0,-9 L0,9 M-6,-4 L0,-9 L6,-4',                                       // 上箭头
+    'M0,9 L0,-9 M-6,4 L0,9 L6,4',                                          // 下箭头
+    'M-9,-6 L9,6 M-9,6 L9,-6 M0,-9 L0,9',                                  // 米字
+    'M-8,-8 L8,8 M-6,-10 L-10,-6 M6,10 L10,6',                             // 剑形
+    'M-9,-9 L9,9 M-9,9 L9,-9',                                             // 大叉
+    'M0,-9 L9,0 L0,9 L-9,0Z',                                              // 菱形
+    'M-9,0 A9,9 0 0,1 0,-9 A9,9 0 0,1 9,0',                                // 上弯弧
+    'M-9,0 Q0,-14 9,0 Q0,14 -9,0Z',                                        // 眼形
+    'M-8,-8 L0,0 L-8,8 M8,-8 L0,0 L8,8',                                   // 双尖
+    'M0,-9 L0,9 M-7,-7 L7,7 M7,-7 L-7,7'                                   // 星芒
+  ];
+
+  const TEXTS = [
+    '☉','☽','☿','♀','♁','♂','♃','♄','♅','♆','♇',
+    'Ψ','Ω','Δ','Σ','Φ','Θ','Λ','Ξ','Π',
+    'א','ב','ג','ד','ה','ו','ז',
+    '✦','✧','✶','✷','✸','✹','✺',
+    '⟁','⟒','⌘','⌬','⌖','⍟','⎈','⏥','⏣','ᛉ','ᛊ','ᚦ'
+  ];
+
+  const layer0 = [];   // 中心清晰
+  const layer1 = [];   // 中圈轻模糊
+  const layer2 = [];   // 外圈明显模糊
+
+  for (let i = 0; i < TOTAL; i++) {
+    const th = rnd() * Math.PI * 2;
+    const nr = Math.pow(rnd(), 0.72);              // 归一化半径（中心偏密）
+    const x = CX + Math.cos(th) * nr * RX;
+    const y = CY + Math.sin(th) * nr * RY;
+
+    // 大小：中心大，边缘小
+    const size = 1.6 + 9.5 * Math.pow(1 - nr, 1.35) + rnd() * 4.5;
+    // 透明度：中心实，边缘虚
+    const op = (0.34 + 0.66 * Math.pow(1 - nr, 0.75)) * (0.65 + rnd() * 0.35);
+    // 旋转随机
+    const rot = (rnd() * 360) | 0;
+    // 随机选形：55% 路径，45% 字符
+    const isPath = rnd() < 0.55;
+
+    let body;
+    if (isPath) {
+      const d = PATHS[(rnd() * PATHS.length) | 0];
+      const sw = (0.9 + rnd() * 1.1).toFixed(2);
+      body = '<path d="' + d + '" fill="none" stroke="currentColor" stroke-width="' + sw + '"/>';
+    } else {
+      const t = TEXTS[(rnd() * TEXTS.length) | 0];
+      const fs = (size * 1.55).toFixed(1);
+      body = '<text x="0" y="0" font-family="Georgia,serif" text-anchor="middle" dominant-baseline="middle" font-size="' + fs + '" fill="currentColor" stroke="none">' + t + '</text>';
+    }
+
+    const el =
+      '<g transform="translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ') ' +
+      'rotate(' + rot + ') scale(' + size.toFixed(2) + ')" ' +
+      'opacity="' + op.toFixed(2) + '">' + body + '</g>';
+
+    if (nr < 0.5)        layer0.push(el);
+    else if (nr < 0.78)  layer1.push(el);
+    else                 layer2.push(el);
+  }
+
+  document.getElementById('bgLayer0').innerHTML = layer0.join('');
+  document.getElementById('bgLayer1').innerHTML = layer1.join('');
+  document.getElementById('bgLayer2').innerHTML = layer2.join('');
+})();
+</script>
+
+<!-- ================= 主逻辑 ================= -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+  document.addEventListener('dragstart', (e) => {
+    if (e.target.tagName !== 'INPUT') e.preventDefault();
+  });
+
+  const RENDER_SCALE    = 1.5;
+  const EXPORT_SCALE    = 2.0;
+  const JPEG_QUALITY    = 0.92;
+  const MOSAIC_BLOCK_PT = 5;
+
+  const $ = id => document.getElementById(id);
+  const openDirBtn     = $('openDirBtn');
+  const openOutputBtn  = $('openOutputBtn');
+  const prevPageBtn    = $('prevPageBtn');
+  const nextPageBtn    = $('nextPageBtn');
+  const pageInfo       = $('pageInfo');
+  const zoomInBtn      = $('zoomInBtn');
+  const zoomOutBtn     = $('zoomOutBtn');
+  const fitBtn         = $('fitBtn');
+  const clearBtn       = $('clearBtn');
+  const applyAllBtn    = $('applyAllBtn');
+  const saveCurrentBtn = $('saveCurrentBtn');
+  const processBtn     = $('processBtn');
+  const statusEl       = $('status');
+  const filelistEl     = $('filelist');
+  const listHeader     = $('filelistHeader');
+  const viewer         = $('viewer');
+  const viewerWrapper  = $('viewerWrapper');
+  const pdfCard        = $('pdfCard');
+  const canvas         = $('pdfCanvas');
+  const ctx            = canvas.getContext('2d');
+  const toastEl        = $('toast');
+
+  let coverStyle     = 'white';
+  let dirHandle      = null;
+  const files        = [];
+  const outputFiles  = [];
+  let currentList    = 'source';
+  let currentIdx     = -1;
+  let currentPageIdx = 0;
+  let pdfDoc         = null;
+  let baseCanvas     = null;
+  let zoom           = 1;
+  let spaceDown      = false;
+  let panning        = false;
+  let panStart       = null;
+  let isDrawing      = false;
+  let startPt        = null;
+  let currentRect    = null;
+
+  function setStatus(m) { statusEl.textContent = m || ''; }
+  function showToast(msg, type) {
+    toastEl.textContent = msg;
+    toastEl.className = 'toast show' + (type ? ' ' + type : '');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => { toastEl.className = 'toast'; }, 2800);
+  }
+  const arrOf = list => list === 'source' ? files : outputFiles;
+  const currentFile = () => {
+    const arr = arrOf(currentList);
+    return currentIdx >= 0 && currentIdx < arr.length ? arr[currentIdx] : null;
+  };
+  const currentRects = () => {
+    const f = currentFile();
+    return f ? (f.pages[currentPageIdx] || []) : [];
+  };
+  function setCurrentRects(rects) {
+    const f = currentFile(); if (!f) return;
+    if (rects.length === 0) delete f.pages[currentPageIdx];
+    else f.pages[currentPageIdx] = rects;
+  }
+  const hasAnyRects = f => Object.keys(f.pages).some(k => f.pages[k] && f.pages[k].length);
+
+  function updateButtons() {
+    const f = currentFile();
+    const hasFile = !!f && f.isPdf;
+    const total = hasFile ? f.totalPages : 0;
+
+    prevPageBtn.disabled = !hasFile || currentPageIdx <= 0;
+    nextPageBtn.disabled = !hasFile || currentPageIdx >= total - 1;
+    pageInfo.textContent = hasFile ? `${currentPageIdx + 1} / ${total}` : '- / -';
+
+    zoomOutBtn.disabled = !hasFile;
+    zoomInBtn.disabled  = !hasFile;
+    fitBtn.disabled     = !hasFile;
+
+    const hasRects = hasFile && currentRects().length > 0;
+    clearBtn.disabled       = !hasRects;
+    applyAllBtn.disabled    = !hasRects || currentList !== 'source' || files.filter(x => x.isPdf).length < 2;
+    saveCurrentBtn.disabled = !hasFile || !Object.keys(f.pages).some(k => f.pages[k] && f.pages[k].length);
+
+    processBtn.disabled     = !files.some(x => x.isPdf && hasAnyRects(x));
+    openOutputBtn.disabled  = !dirHandle;
+  }
+
+  function renderFileList() {
+    filelistEl.querySelectorAll('.fileitem').forEach(n => n.remove());
+    listHeader.innerHTML = '';
+
+    if (currentList === 'source') {
+      if (!dirHandle) { listHeader.textContent = '未选择文件夹'; return; }
+      if (files.length === 0) { listHeader.textContent = '（空文件夹）'; return; }
+      const pdfCount = files.filter(f => f.isPdf).length;
+      listHeader.textContent = `源目录（${files.length} 个文件，${pdfCount} 个 PDF）`;
+      files.forEach((f, i) => filelistEl.appendChild(makeItem(f, i, 'source')));
+    } else {
+      const back = document.createElement('button');
+      back.className = 'back-btn';
+      back.textContent = '← 返回源目录';
+      back.onclick = () => { currentList = 'source'; currentIdx = -1; renderFileList(); updateButtons(); };
+      listHeader.appendChild(back);
+
+      const title = document.createElement('div');
+      title.style.cssText = 'margin-top:6px;';
+      title.textContent = `处理ok（${outputFiles.length} 个文件）`;
+      listHeader.appendChild(title);
+
+      if (outputFiles.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'fileitem';
+        empty.style.color = '#64748b';
+        empty.textContent = '（空）';
+        filelistEl.appendChild(empty);
+        return;
+      }
+      outputFiles.forEach((f, i) => filelistEl.appendChild(makeItem(f, i, 'output')));
+    }
+  }
+
+  function makeItem(f, i, list) {
+    const div = document.createElement('div');
+    const active = (list === currentList && i === currentIdx);
+    let cls = 'fileitem';
+    if (active) cls += ' active';
+    if (list === 'output' || f.processed) cls += ' done';
+    if (!f.isPdf) cls += ' disabled';
+    div.className = cls;
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = f.name;
+    name.title = f.name + (f.isPdf ? '' : '（非 PDF，跳过）');
+    div.appendChild(name);
+
+    if (f.isPdf && (f.processed || list === 'output')) {
+      const mark = document.createElement('span');
+      mark.className = 'mark';
+      mark.textContent = '✓';
+      mark.style.color = '#22c55e';
+      div.appendChild(mark);
+    }
+    if (f.isPdf && hasAnyRects(f)) {
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      div.appendChild(dot);
+    }
+
+    div.onclick = () => { if (f.isPdf) openFile(list, i); };
+    return div;
+  }
+
+  openDirBtn.addEventListener('click', async () => {
+    if (!window.showDirectoryPicker) {
+      showToast('当前浏览器不支持文件夹写入，请用 Chrome / Edge', 'error');
+      return;
+    }
+    try {
+      dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    } catch (e) {
+      if (e.name !== 'AbortError') showToast('选择失败：' + e.message, 'error');
+      return;
+    }
+
+    setStatus('正在读取文件列表…');
+    files.length = 0;
+    outputFiles.length = 0;
+    currentList = 'source';
+    currentIdx = -1;
+    pdfDoc = null; baseCanvas = null;
+    pdfCard.style.display = 'none';
+
+    try {
+      for await (const entry of dirHandle.values()) {
+        if (entry.kind === 'file') {
+          files.push({
+            handle: entry,
+            name: entry.name,
+            isPdf: /\.pdf$/i.test(entry.name),
+            pages: {},
+            totalPages: 0,
+            processed: false
+          });
+        }
+      }
+    } catch (e) {
+      showToast('读取失败：' + e.message, 'error');
+      return;
+    }
+
+    files.sort((a, b) => {
+      if (a.isPdf !== b.isPdf) return a.isPdf ? -1 : 1;
+      return a.name.localeCompare(b.name, 'zh-Hans-CN');
+    });
+
+    await refreshOutputList(true);
+    renderFileList();
+    updateButtons();
+
+    const firstPdfIdx = files.findIndex(f => f.isPdf);
+    if (firstPdfIdx < 0) {
+      setStatus('该文件夹内没有 PDF 文件');
+      showToast('该文件夹内没有 PDF 文件', 'error');
+      return;
+    }
+    setStatus(`已加载 ${files.length} 个文件（${files.filter(f => f.isPdf).length} 个 PDF）`);
+    openFile('source', firstPdfIdx);
+  });
+
+  async function refreshOutputList(silent) {
+    if (!dirHandle) return false;
+    try {
+      const outDir = await dirHandle.getDirectoryHandle('处理ok', { create: false });
+      outputFiles.length = 0;
+      for await (const entry of outDir.values()) {
+        if (entry.kind === 'file') {
+          outputFiles.push({
+            handle: entry,
+            name: entry.name,
+            isPdf: /\.pdf$/i.test(entry.name),
+            pages: {},
+            totalPages: 0
+          });
+        }
+      }
+      outputFiles.sort((a, b) => {
+        if (a.isPdf !== b.isPdf) return a.isPdf ? -1 : 1;
+        return a.name.localeCompare(b.name, 'zh-Hans-CN');
+      });
+
+      const outNames = new Set(outputFiles.map(o => o.name));
+      files.forEach(f => {
+        if (!f.isPdf) return;
+        const expect = f.name.replace(/\.pdf$/i, '') + '_redacted.pdf';
+        if (outNames.has(expect)) { f.processed = true; f.outputName = expect; }
+        else { f.processed = false; f.outputName = null; }
+      });
+      return true;
+    } catch (e) {
+      if (!silent && e.name !== 'NotFoundError') showToast('读取处理ok失败：' + e.message, 'error');
+      return false;
+    }
+  }
+
+  openOutputBtn.addEventListener('click', async () => {
+    if (!dirHandle) { showToast('请先选择工作文件夹', 'error'); return; }
+    const ok = await refreshOutputList(false);
+    if (!ok) {
+      showToast('还没有生成「处理ok」文件夹，请先处理至少一个文件', 'error');
+      return;
+    }
+    currentList = 'output';
+    currentIdx = -1;
+    renderFileList();
+    updateButtons();
+    setStatus(`处理ok 中共有 ${outputFiles.length} 个文件`);
+    const firstPdfIdx = outputFiles.findIndex(f => f.isPdf);
+    if (firstPdfIdx >= 0) openFile('output', firstPdfIdx);
+  });
+
+  async function openFile(list, index) {
+    const arr = arrOf(list);
+    if (index < 0 || index >= arr.length) return;
+    const f = arr[index];
+    if (!f.isPdf) return;
+
+    currentList = list;
+    currentIdx = index;
+    currentPageIdx = 0;
+    renderFileList();
+    updateButtons();
+
+    setStatus(`正在加载 ${f.name}…`);
+    try {
+      const file  = await f.handle.getFile();
+      const bytes = await file.arrayBuffer();
+      pdfDoc = await pdfjsLib.getDocument({ data: bytes }).promise;
+      f.totalPages = pdfDoc.numPages;
+      await renderPage(0);
+      setStatus(`已打开：${f.name}${list === 'output' ? '（处理ok）' : ''}`);
+    } catch (e) {
+      console.error(e);
+      showToast('加载失败：' + e.message, 'error');
+    }
+  }
+
+  async function renderPage(pageIndex) {
+    if (!pdfDoc) return;
+    const page     = await pdfDoc.getPage(pageIndex + 1);
+    const viewport = page.getViewport({ scale: RENDER_SCALE });
+
+    canvas.width  = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    pdfCard.style.display = 'inline-block';
+
+    baseCanvas = document.createElement('canvas');
+    baseCanvas.width  = canvas.width;
+    baseCanvas.height = canvas.height;
+    const bctx = baseCanvas.getContext('2d');
+    bctx.fillStyle = '#fff';
+    bctx.fillRect(0, 0, baseCanvas.width, baseCanvas.height);
+    await page.render({ canvasContext: bctx, viewport }).promise;
+
+    currentPageIdx = pageIndex;
+    fitToViewer();
+    redraw();
+  }
+
+  function applyZoom() {
+    if (!canvas.width) return;
+    canvas.style.width  = (canvas.width  * zoom) + 'px';
+    canvas.style.height = (canvas.height * zoom) + 'px';
+  }
+  function fitToViewer() {
+    if (!canvas.width || !canvas.height) return;
+    const padX = 20 * 2 + 16 + 8;
+    const padY = 20 * 2 + 16 + 8;
+    const availW = Math.max(50, viewer.clientWidth  - padX);
+    const availH = Math.max(50, viewer.clientHeight - padY);
+    const z = Math.min(availW / canvas.width, availH / canvas.height);
+    zoom = Math.max(0.2, Math.min(z, 3));
+    applyZoom();
+    viewer.scrollLeft = 0;
+    viewer.scrollTop  = 0;
+  }
+  function setZoom(newZoom) {
+    newZoom = Math.max(0.2, Math.min(6, newZoom));
+    if (newZoom === zoom) return;
+    const oldZoom = zoom;
+    const cx = viewer.scrollLeft + viewer.clientWidth  / 2;
+    const cy = viewer.scrollTop  + viewer.clientHeight / 2;
+    zoom = newZoom;
+    applyZoom();
+    const ratio = zoom / oldZoom;
+    viewer.scrollLeft = cx * ratio - viewer.clientWidth  / 2;
+    viewer.scrollTop  = cy * ratio - viewer.clientHeight / 2;
+    updateButtons();
+  }
+  zoomInBtn.addEventListener('click',  () => setZoom(zoom * 1.25));
+  zoomOutBtn.addEventListener('click', () => setZoom(zoom / 1.25));
+  fitBtn.addEventListener('click', () => { fitToViewer(); updateButtons(); });
+
+  viewer.addEventListener('wheel', (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      setZoom(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+    }
+  }, { passive: false });
+
+  function mosaicRegion(targetCtx, x, y, w, h, blockPx) {
+    const cv = targetCtx.canvas;
+    const sx = Math.max(0, Math.floor(x));
+    const sy = Math.max(0, Math.floor(y));
+    const ex = Math.min(cv.width,  Math.ceil(x + w));
+    const ey = Math.min(cv.height, Math.ceil(y + h));
+    const sw = ex - sx, sh = ey - sy;
+    if (sw <= 0 || sh <= 0) return;
+
+    const cols = Math.max(1, Math.round(sw / blockPx));
+    const rows = Math.max(1, Math.round(sh / blockPx));
+
+    const small = document.createElement('canvas');
+    small.width = cols; small.height = rows;
+    const sctx = small.getContext('2d');
+    sctx.imageSmoothingEnabled = true;
+    sctx.drawImage(cv, sx, sy, sw, sh, 0, 0, cols, rows);
+
+    targetCtx.save();
+    targetCtx.imageSmoothingEnabled = false;
+    targetCtx.drawImage(small, 0, 0, cols, rows, sx, sy, sw, sh);
+    targetCtx.restore();
+  }
+  function paintRegion(targetCtx, r, blockPx) {
+    const W = targetCtx.canvas.width, H = targetCtx.canvas.height;
+    const x = r.x * W, y = r.y * H, w = r.w * W, h = r.h * H;
+    if (w <= 0 || h <= 0) return;
+    if (coverStyle === 'mosaic')      mosaicRegion(targetCtx, x, y, w, h, blockPx);
+    else if (coverStyle === 'black') { targetCtx.fillStyle = '#000'; targetCtx.fillRect(x, y, w, h); }
+    else                             { targetCtx.fillStyle = '#fff'; targetCtx.fillRect(x, y, w, h); }
+  }
+  function paintRegionPreview(targetCtx, r, blockPx) {
+    paintRegion(targetCtx, r, blockPx);
+    const W = targetCtx.canvas.width, H = targetCtx.canvas.height;
+    targetCtx.save();
+    targetCtx.strokeStyle = '#ff2d2d';
+    targetCtx.lineWidth = 2;
+    targetCtx.setLineDash([6, 4]);
+    targetCtx.strokeRect(r.x * W, r.y * H, r.w * W, r.h * H);
+    targetCtx.restore();
+  }
+  function redraw() {
+    if (!baseCanvas) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(baseCanvas, 0, 0);
+    const blockPx = Math.max(3, Math.round(MOSAIC_BLOCK_PT * RENDER_SCALE));
+    currentRects().forEach(r => paintRegionPreview(ctx, r, blockPx));
+    if (isDrawing && currentRect) paintRegionPreview(ctx, currentRect, blockPx);
+    updateButtons();
+  }
+
+  $('coverOptions').addEventListener('change', (e) => {
+    coverStyle = e.target.value;
+    redraw();
+  });
+
+  function getCanvasPoint(evt) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width  / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (evt.clientX - rect.left) * scaleX,
+      y: (evt.clientY - rect.top)  * scaleY
+    };
+  }
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!pdfDoc || e.button !== 0 || spaceDown) return;
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    isDrawing = true;
+    startPt = getCanvasPoint(e);
+    currentRect = null;
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!isDrawing) return;
+    const p = getCanvasPoint(e);
+    const x = Math.min(startPt.x, p.x);
+    const y = Math.min(startPt.y, p.y);
+    const w = Math.abs(p.x - startPt.x);
+    const h = Math.abs(p.y - startPt.y);
+    currentRect = {
+      x: x / canvas.width, y: y / canvas.height,
+      w: w / canvas.width, h: h / canvas.height
+    };
+    redraw();
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    if (!isDrawing) return;
+    isDrawing = false;
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (currentRect && currentRect.w > 0.005 && currentRect.h > 0.005) {
+      const rects = currentRects().slice();
+      rects.push(currentRect);
+      setCurrentRects(rects);
+    }
+    currentRect = null;
+    redraw();
+    renderFileList();
+  });
+  canvas.addEventListener('pointercancel', () => {
+    isDrawing = false; currentRect = null; redraw();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && !e.repeat && e.target.tagName !== 'INPUT') {
+      spaceDown = true;
+      viewerWrapper.classList.add('pan-mode');
+      e.preventDefault();
+    }
+  });
+  document.addEventListener('keyup', (e) => {
+    if (e.code === 'Space') {
+      spaceDown = false;
+      viewerWrapper.classList.remove('pan-mode');
+    }
+  });
+  viewer.addEventListener('pointerdown', (e) => {
+    if (!pdfDoc) return;
+    if (e.button === 1 || (e.button === 0 && spaceDown)) {
+      e.preventDefault();
+      panning = true;
+      panStart = { x: e.clientX, y: e.clientY, sl: viewer.scrollLeft, st: viewer.scrollTop };
+      viewerWrapper.classList.add('panning');
+      viewer.setPointerCapture(e.pointerId);
+    }
+  });
+  viewer.addEventListener('pointermove', (e) => {
+    if (!panning) return;
+    viewer.scrollLeft = panStart.sl - (e.clientX - panStart.x);
+    viewer.scrollTop  = panStart.st - (e.clientY - panStart.y);
+  });
+  viewer.addEventListener('pointerup', (e) => {
+    if (!panning) return;
+    panning = false;
+    viewerWrapper.classList.remove('panning');
+    try { viewer.releasePointerCapture(e.pointerId); } catch (_) {}
+  });
+  viewer.addEventListener('pointercancel', () => {
+    panning = false; viewerWrapper.classList.remove('panning');
+  });
+  viewer.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
+
+  prevPageBtn.addEventListener('click', () => {
+    if (pdfDoc && currentPageIdx > 0) renderPage(currentPageIdx - 1);
+  });
+  nextPageBtn.addEventListener('click', () => {
+    if (pdfDoc && currentPageIdx < pdfDoc.numPages - 1) renderPage(currentPageIdx + 1);
+  });
+  clearBtn.addEventListener('click', () => {
+    setCurrentRects([]);
+    redraw();
+    renderFileList();
+  });
+
+  applyAllBtn.addEventListener('click', () => {
+    if (currentList !== 'source') return;
+    const rects = currentRects();
+    if (rects.length === 0) return;
+    const pageIdx = currentPageIdx;
+    const pdfFiles = files.filter(f => f.isPdf);
+    pdfFiles.forEach(f => { f.pages[pageIdx] = rects.map(r => ({ ...r })); });
+    renderFileList();
+    updateButtons();
+    showToast(`已套用到全部 ${pdfFiles.length} 个 PDF 的第 ${pageIdx + 1} 页`, 'success');
+  });
+
+  async function processPdf(originalBytes, pagesRects) {
+    const jspdf  = await pdfjsLib.getDocument({ data: originalBytes.slice(0) }).promise;
+    const srcDoc = await PDFLib.PDFDocument.load(originalBytes.slice(0), { ignoreEncryption: true });
+    const newDoc = await PDFLib.PDFDocument.create();
+
+    const total = jspdf.numPages;
+    const exportBlockPx = Math.max(4, Math.round(MOSAIC_BLOCK_PT * EXPORT_SCALE));
+
+    for (let i = 0; i < total; i++) {
+      const rects = (pagesRects[i] || []).filter(Boolean);
+      if (rects.length === 0) {
+        const [copied] = await newDoc.copyPages(srcDoc, [i]);
+        newDoc.addPage(copied);
+      } else {
+        const page     = await jspdf.getPage(i + 1);
+        const viewport = page.getViewport({ scale: EXPORT_SCALE });
+
+        const tmp = document.createElement('canvas');
+        tmp.width  = Math.floor(viewport.width);
+        tmp.height = Math.floor(viewport.height);
+        const tctx = tmp.getContext('2d');
+        tctx.fillStyle = '#fff';
+        tctx.fillRect(0, 0, tmp.width, tmp.height);
+        await page.render({ canvasContext: tctx, viewport }).promise;
+
+        rects.forEach(r => paintRegion(tctx, r, exportBlockPx));
+
+        const dataUrl  = tmp.toDataURL('image/jpeg', JPEG_QUALITY);
+        const imgBytes = await (await fetch(dataUrl)).arrayBuffer();
+        const img      = await newDoc.embedJpg(imgBytes);
+
+        const vp1 = page.getViewport({ scale: 1 });
+        const np  = newDoc.addPage([vp1.width, vp1.height]);
+        np.drawImage(img, { x: 0, y: 0, width: vp1.width, height: vp1.height });
+      }
+    }
+    return await newDoc.save({ useObjectStreams: true });
+  }
+
+  saveCurrentBtn.addEventListener('click', async () => {
+    const f = currentFile();
+    if (!f || !f.isPdf) return;
+    if (!Object.keys(f.pages).some(k => f.pages[k] && f.pages[k].length)) {
+      showToast('当前文件没有框选任何区域', 'error');
+      return;
+    }
+    if (!dirHandle) { showToast('请先选择工作文件夹', 'error'); return; }
+
+    saveCurrentBtn.disabled = true;
+    showToast('正在处理当前文件…');
+
+    try {
+      if (currentList === 'source') {
+        const outDir = await dirHandle.getDirectoryHandle('处理ok', { create: true });
+        const file   = await f.handle.getFile();
+        const bytes  = await file.arrayBuffer();
+        const outBytes = await processPdf(bytes, f.pages);
+        const outName  = f.name.replace(/\.pdf$/i, '') + '_redacted.pdf';
+        const outHandle = await outDir.getFileHandle(outName, { create: true });
+        const w = await outHandle.createWritable();
+        await w.write(outBytes);
+        await w.close();
+
+        f.processed = true;
+        f.outputName = outName;
+        await refreshOutputList(true);
+        renderFileList();
+        showToast(`已保存到「处理ok」：${outName}`, 'success');
+      } else {
+        const file = await f.handle.getFile();
+        const bytes = await file.arrayBuffer();
+        const outBytes = await processPdf(bytes, f.pages);
+        const w = await f.handle.createWritable();
+        await w.write(outBytes);
+        await w.close();
+        f.pages = {};
+        redraw();
+        renderFileList();
+        showToast(`已覆盖保存：${f.name}`, 'success');
+      }
+    } catch (e) {
+      console.error(e);
+      showToast('保存失败：' + e.message, 'error');
+    } finally {
+      saveCurrentBtn.disabled = false;
+      updateButtons();
+    }
+  });
+
+  processBtn.addEventListener('click', async () => {
+    const targets = files.filter(f => f.isPdf && hasAnyRects(f));
+    if (targets.length === 0) { showToast('没有任何 PDF 被框选', 'error'); return; }
+
+    processBtn.disabled = true;
+    openDirBtn.disabled = true;
+    openOutputBtn.disabled = true;
+    saveCurrentBtn.disabled = true;
+
+    try {
+      const outDir = await dirHandle.getDirectoryHandle('处理ok', { create: true });
+
+      for (let i = 0; i < targets.length; i++) {
+        const f = targets[i];
+        setStatus(`处理中 ${i + 1}/${targets.length}：${f.name}`);
+
+        const file     = await f.handle.getFile();
+        const bytes    = await file.arrayBuffer();
+        const outBytes = await processPdf(bytes, f.pages);
+
+        const outName = f.name.replace(/\.pdf$/i, '') + '_redacted.pdf';
+        const outHandle = await outDir.getFileHandle(outName, { create: true });
+        const w = await outHandle.createWritable();
+        await w.write(outBytes);
+        await w.close();
+
+        f.processed = true;
+        f.outputName = outName;
+      }
+
+      await refreshOutputList(true);
+      renderFileList();
+      showToast(`处理完成：${targets.length} 个文件已保存到「处理ok」`, 'success');
+      setStatus(`完成！${targets.length} 个文件已保存到「处理ok」`);
+    } catch (e) {
+      console.error(e);
+      showToast('处理失败：' + e.message, 'error');
+      setStatus('处理失败：' + e.message);
+    } finally {
+      processBtn.disabled = false;
+      openDirBtn.disabled = false;
+      openOutputBtn.disabled = false;
+      updateButtons();
+    }
+  });
+
+  updateButtons();
+})();
+</script>
+</body>
+</html>
